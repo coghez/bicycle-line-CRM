@@ -375,9 +375,14 @@
     window.addEventListener('beforeunload', (e) => { if (BL.editing && BL.editing.dirty) { e.preventDefault(); e.returnValue = ''; } });
     await render();
     if (store.consumePasswordSetup && store.consumePasswordSetup()) {
-      const v = await promptDialog(t('profile.changePassword'), [{ name: 'pw', label: t('profile.newPassword'), type: 'password', required: true }]);
-      if (v && v.pw.length >= 8) { try { await store.changePassword(v.pw); toast(t('profile.pwOk')); } catch (e) { fail(e); } }
-      else if (v) toast(t('profile.pwShort'), true);
+      // primo accesso da invito: l'utente sceglie la sua password (minimo 8 caratteri)
+      for (let i = 0; i < 5; i++) {
+        const v = await promptDialog(t('profile.changePassword'), [{ name: 'pw', label: t('profile.newPassword') + ' (min. 8)', type: 'password', required: true }, { name: 'pw2', label: t('profile.newPassword') + ' ✓', type: 'password', required: true }]);
+        if (!v) break;
+        if (v.pw.length < 8) { toast(t('profile.pwShort'), true); continue; }
+        if (v.pw !== v.pw2) { toast('Le due password non coincidono', true); continue; }
+        try { await store.changePassword(v.pw); toast(t('profile.pwOk')); break; } catch (e) { fail(e); }
+      }
     }
   }
 

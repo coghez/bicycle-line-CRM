@@ -241,7 +241,7 @@
             const saved = await store.saveRequest(req);
             if (!store.manageCiclismoQuote) throw Error('Preventivi integrati disponibili solo con Supabase.');
             const origin=location.origin;
-            const quoteUrl='preventivo.html?request='+encodeURIComponent(saved.id)+'&v=14';
+            const quoteUrl='preventivo.html?request='+encodeURIComponent(saved.id)+'&v=15';
             const popup=document.createElement('div');
             popup.style.cssText='position:fixed;inset:0;background:#f1f3f7;z-index:100005;display:flex;flex-direction:column';
             popup.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 17px;background:#fff;border-bottom:1px solid #ddd"><strong>Preventivo · '+esc(saved.team)+'</strong><button type="button" class="btn" id="bl-close-quote">Chiudi</button></div><iframe title="Preventivo Bicycle Line" style="border:0;flex:1;width:100%" src="'+quoteUrl+'"></iframe>';

@@ -4,7 +4,7 @@
 (function (root) {
   'use strict';
   const SDK = 'vendor/supabase.min.js'; // supabase-js 2.45.4, incluso: niente CDN esterno
-  let db = null, me = null, channel = null, passwordSetup = false;
+  let db = null, me = null, channel = null, passwordSetup = false, cfgUrl = '', cfgKey = '';
   const urlCache = new Map();
   const authListeners = new Set(), changeListeners = new Set();
 
@@ -39,6 +39,7 @@
       const h = location.hash || '';
       passwordSetup = /type=(invite|recovery)/.test(h);
       if (!root.supabase) await loadScript(SDK);
+      cfgUrl = cfg.supabaseUrl; cfgKey = cfg.supabaseAnonKey;
       db = root.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true,
         // Blocco interno semplice al posto di navigator.locks: con il blocco del browser, dopo un cambio scheda
         // o un rinnovo della sessione, le chiamate al database potevano restare in attesa per sempre.
@@ -61,11 +62,14 @@
     onAuth(f) { authListeners.add(f); },
     onChange(f) { changeListeners.add(f); },
     me() { return me ? { ...me } : null; },
-    consumePasswordSetup() { const v = passwordSetup && !!me; passwordSetup = false; return v; },
+    consumePasswordSetup() { const v = !!me && (passwordSetup || !!me.must_set_password); passwordSetup = false; return v; },
     async signIn(email, password) { ok(await db.auth.signInWithPassword({ email, password })); },
     async signOut() { await db.auth.signOut(); me = null; },
     async resetPassword(email) { ok(await db.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname })); },
-    async changePassword(pw) { ok(await db.auth.updateUser({ password: pw })); },
+    async changePassword(pw) {
+      ok(await db.auth.updateUser({ password: pw }));
+      if (me && me.must_set_password) { try { ok(await db.rpc('bl_password_set')); me.must_set_password = false; } catch (e) { console.warn(e); } }
+    },
     async updateMyProfile(patch) {
       const row = ok(await db.from('profiles').update(pick(patch, ['full_name', 'language'])).eq('id', me.id).select().single());
       me = row; return { ...row };
@@ -74,20 +78,23 @@
     // utenti
     async listUsers() { return ok(await db.from('profiles').select('*').order('full_name')); },
     async saveUser(u) { return ok(await db.from('profiles').update(pick(u, ['full_name', 'role', 'language', 'country', 'active'])).eq('id', u.id).select().single()); },
+    // Invito: l'admin prepara l'invito nel database (ruolo, lingua) e Supabase manda all'invitato un link di accesso.
+    // Al primo accesso il CRM gli chiede di scegliere la password. Nessuna Edge Function necessaria.
     async inviteUser(u) {
-      const res = await db.functions.invoke('bl-invite-user', { body: { ...pick(u, ['email', 'full_name', 'role', 'language', 'country']), redirect_to: location.origin + location.pathname } });
-      if (!res.error && !(res.data && res.data.error)) return res.data;
-      const status = res.error && res.error.context && res.error.context.status;
-      if (res.data && res.data.error) throw new Error(res.data.error);
-      if (status && status !== 404) throw new Error(res.error.message || 'Invito non riuscito');
-      // funzione nuova non pubblicata: si usa "invite-user" del CRM originale, poi si completa il profilo
-      const old = await db.functions.invoke('invite-user', { body: { email: u.email, full_name: u.full_name || '' } });
-      if (old.error || (old.data && old.data.error)) throw new Error((old.data && old.data.error) || old.error.message || 'Invito non riuscito');
       const email = String(u.email || '').trim().toLowerCase();
-      for (let i = 0; i < 5; i++) {
-        const { data: p } = await db.from('profiles').select('id').ilike('email', email).maybeSingle();
-        if (p) { await db.from('profiles').update(pick(u, ['full_name', 'role', 'language', 'country'])).eq('id', p.id); break; }
-        await new Promise(r => setTimeout(r, 600));
+      const r = await db.rpc('bl_invite_prepare', { p_email: email, p_full_name: u.full_name || '', p_role: u.role || 'agent', p_language: u.language || 'it', p_country: u.country || '' });
+      if (r.error) {
+        if (/could not find|does not exist|schema cache/i.test(r.error.message || '')) { root.BL && root.BL.checkQuoteNumbering && root.BL.checkQuoteNumbering(true); throw new Error('Per invitare utenti serve l\'aggiornamento del database: segui il riquadro «Aggiornamento database» in basso a sinistra (una volta sola).'); }
+        throw new Error(r.error.message);
+      }
+      // client separato: l'invio del link non tocca la sessione dell'amministratore
+      const tmp = root.supabase.createClient(cfgUrl, cfgKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'bl-invite-tmp' } });
+      const { error } = await tmp.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } });
+      if (error) {
+        const m = error.message || '';
+        if (/rate|too many|seconds/i.test(m)) throw new Error('Supabase ha già inviato troppe email in poco tempo: l\'invito è pronto, riprova a premere «Invia invito» tra qualche minuto.');
+        if (/signup|not allowed/i.test(m)) throw new Error('In Supabase le nuove registrazioni via email sono disattivate (Authentication → Sign In / Providers → Email → «Allow new users to sign up»).');
+        throw new Error(m);
       }
       return { ok: true };
     },
@@ -185,8 +192,10 @@
     // Scrive i prodotti del preventivo nel modulo TAGLIE (come bozza): funziona con lo script 03 già installato.
     async quoteNumber(requestId) { return ok(await db.rpc('bl_quote_number',{p_request:requestId})); },
     async hasQuoteNumbering() {
-      const { error } = await db.rpc('bl_quote_number',{p_request:null});
-      return !(error && /could not find|does not exist|schema cache/i.test(error.message||''));
+      const missing = (e) => !!(e && /could not find|does not exist|schema cache/i.test(e.message || ''));
+      const a = await db.rpc('bl_quote_number', { p_request: null });
+      const b = await db.rpc('bl_invite_prepare', { p_email: '', p_full_name: '', p_role: '', p_language: '', p_country: '' });
+      return !missing(a.error) && !missing(b.error);
     },
     async syncSizeLines(token, lines) { return ok(await db.rpc('bl_sizes_public_save',{p_token:token,p_lines:lines,p_submit:false})); },
     async setRequestTotal(requestId, totalNet) {

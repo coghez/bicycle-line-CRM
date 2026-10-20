@@ -14,7 +14,7 @@
 
   const imgSize = (src) => new Promise((res) => { const i = new Image(); i.onload = () => res([i.naturalWidth, i.naturalHeight]); i.onerror = () => res([0, 0]); i.src = src; });
   const toDataURL = async (url) => {
-    const b = await (await fetch(url)).blob();
+    const b = await (await (window.BLImgFetch ? window.BLImgFetch(url) : fetch(url))).blob();
     return await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
   };
   /** foto prodotto come data URL + dimensioni */

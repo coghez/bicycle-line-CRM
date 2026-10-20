@@ -80,8 +80,8 @@
     const box = document.createElement('div');
     box.id = 'bl-num-setup';
     box.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:9000;max-width:430px;background:#fff;border:1px solid #e6c47a;box-shadow:0 10px 40px #0002;border-radius:12px;padding:16px 18px;font-size:13px;line-height:1.5';
-    box.innerHTML = `<b>Numero preventivo automatico (01.26, 02.26…)</b>
-      <div class="hint" style="margin:6px 0 10px">Per attivarlo serve un piccolo aggiornamento del database, una volta sola:<br>
+    box.innerHTML = `<b>Aggiornamento database (una volta sola)</b>
+      <div class="hint" style="margin:6px 0 10px">Attiva il <b>numero preventivo automatico</b> (01.26, 02.26…) e gli <b>inviti utenti</b> con password scelta da loro; blocca chi prova a registrarsi senza invito.<br>
       1) premi <b>Copia script</b> · 2) premi <b>Apri Supabase</b> · 3) incolla (Ctrl+V) e premi <b>Run</b> · 4) torna qui e premi <b>Fatto</b>.</div>
       <div class="row wrap" style="gap:6px"><button class="btn sm" data-n="copy">Copia script</button>
       <a class="btn sm ghost" target="_blank" rel="noopener" href="https://supabase.com/dashboard/project/${esc(ref)}/sql/new">Apri Supabase</a>
@@ -94,7 +94,7 @@
     box.querySelector('[data-n=later]').onclick = () => box.remove();
     box.querySelector('[data-n=done]').onclick = async () => {
       const ok2 = await store.hasQuoteNumbering().catch(() => false);
-      if (ok2) { box.remove(); BL.toast('Numerazione preventivi attiva: il prossimo sarà assegnato al salvataggio'); }
+      if (ok2) { box.remove(); BL.toast('Database aggiornato: numerazione preventivi e inviti attivi'); }
       else BL.toast('Non ancora attiva: controlla di aver premuto Run in Supabase (deve dire «Success»)');
     };
   };
